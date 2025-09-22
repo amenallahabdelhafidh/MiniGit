@@ -13,6 +13,7 @@ var rootCmd = &cobra.Command{
 	Long:  "A small Git-like tool written in Go for learning purposes",
 }
 
+// Execute runs the root command
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
@@ -21,7 +22,12 @@ func Execute() {
 }
 
 func init() {
+	// Register all commands
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(logCmd)
+	rootCmd.AddCommand(checkoutCmd)
+	rootCmd.AddCommand(diffCmd)
+	rootCmd.AddCommand(listCmd)
+
 }
