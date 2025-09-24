@@ -12,7 +12,6 @@ import (
 )
 
 var statusRepo string
-
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the status of files in a repository",
