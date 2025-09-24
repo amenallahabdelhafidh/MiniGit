@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,89 +13,101 @@ import (
 )
 
 var commitMessage string
-var projectFile string // the .txt file you want to commit
 
 var commitCmd = &cobra.Command{
 	Use:   "commit",
-	Short: "Create a new commit for a single project (.txt file)",
+	Short: "Create a new commit for a repository",
 	Run: func(cmd *cobra.Command, args []string) {
+		repoName, _ := cmd.Flags().GetString("repo")
+		if repoName == "" {
+			fmt.Println("Error: repository name is required. Use -r <repo>")
+			return
+		}
 		if commitMessage == "" {
 			fmt.Println("Error: commit message is required. Use -m \"message\"")
 			return
 		}
 
-		if projectFile == "" {
-			fmt.Println("Error: specify the project file with -p")
-			return
-		}
+		repoPath := filepath.Join(".mygit", "repositories", repoName)
+		commitsPath := filepath.Join(".mygit", "commits")
 
-		// Ensure the project file exists
-		if _, err := os.Stat(projectFile); os.IsNotExist(err) {
-			fmt.Println("Error: project file does not exist:", projectFile)
-			return
-		}
-
-		repoPath := filepath.Join(".", ".mygit")
-		commitsPath := filepath.Join(repoPath, "commits")
-
-		// Ensure repo exists
 		if _, err := os.Stat(repoPath); os.IsNotExist(err) {
-			fmt.Println("Repository not initialized. Run 'mygit init' first.")
+			fmt.Println("Repository does not exist:", repoName)
 			return
 		}
 
-		// Read the project file
-		contentBytes, err := os.ReadFile(projectFile)
-		if err != nil {
-			fmt.Println("Error reading project file:", err)
-			return
-		}
-
-		contentStr := strings.ReplaceAll(string(contentBytes), "\x00", "")
-
-		// Determine next commit ID for this project only
-		projectID := getNextProjectCommitID(commitsPath, projectFile)
-
-		// Prepare commit object
-		commit := make(map[string]interface{})
-		commit["id"] = projectID
-		commit["project"] = projectFile
-		commit["message"] = commitMessage
-		commit["timestamp"] = time.Now().Format(time.RFC3339)
-		commit["files"] = map[string]string{
-			projectFile: contentStr,
-		}
-
-		// Save commit as JSON file
-		commitFile := filepath.Join(commitsPath, fmt.Sprintf("%s_%d.json", projectFile, projectID))
-		data, _ := json.MarshalIndent(commit, "", "  ")
-		os.WriteFile(commitFile, data, 0644)
-
-		fmt.Printf("Committed project '%s' as commit %d\n", projectFile, projectID)
-	},
-}
-
-func init() {
-	commitCmd.Flags().StringVarP(&commitMessage, "message", "m", "", "Commit message")
-	commitCmd.Flags().StringVarP(&projectFile, "project", "p", "", "Project (.txt) file to commit")
-}
-
-// helper function to determine next commit ID for a specific project
-func getNextProjectCommitID(commitsPath, project string) int {
-	files, err := os.ReadDir(commitsPath)
-	if err != nil {
-		return 1
-	}
-
-	maxID := 0
-	for _, f := range files {
-		// Commit filename format: projectFileName_ID.json
-		var id int
-		if n, _ := fmt.Sscanf(f.Name(), project+"_%d.json", &id); n == 1 {
+		// Load latest commit for this repo
+		latestFiles := make(map[string]string)
+		files, _ := os.ReadDir(commitsPath)
+		maxID := 0
+		for _, f := range files {
+			name := f.Name()
+			if !strings.HasPrefix(name, repoName+"_") || !strings.HasSuffix(name, ".json") {
+				continue
+			}
+			idStr := strings.TrimSuffix(strings.TrimPrefix(name, repoName+"_"), ".json")
+			id := 0
+			fmt.Sscanf(idStr, "%d", &id)
 			if id > maxID {
 				maxID = id
 			}
 		}
-	}
-	return maxID + 1
+		if maxID > 0 {
+			data, _ := os.ReadFile(filepath.Join(commitsPath, fmt.Sprintf("%s_%d.json", repoName, maxID)))
+			var commitData map[string]interface{}
+			json.Unmarshal(data, &commitData)
+			if filesMap, ok := commitData["files"].(map[string]interface{}); ok {
+				for k, v := range filesMap {
+					if s, ok := v.(string); ok {
+						latestFiles[k] = s
+					}
+				}
+			}
+		}
+
+		// Track changed files
+		changedFiles := make(map[string]string)
+
+		filepath.WalkDir(repoPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			relPath, _ := filepath.Rel(repoPath, path)
+			contentBytes, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			contentStr := strings.ReplaceAll(string(contentBytes), "\x00", "")
+			if prev, ok := latestFiles[relPath]; !ok || prev != contentStr {
+				changedFiles[relPath] = contentStr
+			}
+			return nil
+		})
+
+		if len(changedFiles) == 0 {
+			fmt.Println("No changes to commit.")
+			return
+		}
+
+		// Prepare new commit
+		newID := maxID + 1
+		commit := map[string]interface{}{
+			"id":        newID,
+			"repo":      repoName,
+			"message":   commitMessage,
+			"timestamp": time.Now().Format(time.RFC3339),
+			"files":     changedFiles,
+		}
+
+		commitFile := filepath.Join(commitsPath, fmt.Sprintf("%s_%d.json", repoName, newID))
+		data, _ := json.MarshalIndent(commit, "", "  ")
+		os.WriteFile(commitFile, data, 0644)
+
+		fmt.Printf("Committed %d changed files as commit %d\n", len(changedFiles), newID)
+	},
+}
+
+func init() {
+	commitCmd.Flags().StringP("repo", "r", "", "Repository name")
+	commitCmd.Flags().StringVarP(&commitMessage, "message", "m", "", "Commit message")
 }

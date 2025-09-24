@@ -19,15 +19,23 @@ var initCmd = &cobra.Command{
 			return
 		}
 
-		// Create .mygit/ and commits/ folders
+		// Create .mygit/ structure
 		os.MkdirAll(filepath.Join(repoPath, "commits"), 0755)
+		os.MkdirAll(filepath.Join(repoPath, "repositories"), 0755) // new for multiple repos
 
-		// Create empty index.json
+		// Create empty index.json (global metadata)
 		indexFile := filepath.Join(repoPath, "index.json")
 		index := make(map[string]interface{})
 		data, _ := json.MarshalIndent(index, "", "  ")
 		os.WriteFile(indexFile, data, 0644)
 
+		// Optional: create global.json for repo list
+		globalFile := filepath.Join(repoPath, "global.json")
+		repos := []string{} // empty list of repositories
+		data, _ = json.MarshalIndent(repos, "", "  ")
+		os.WriteFile(globalFile, data, 0644)
+
 		fmt.Println("Initialized empty mini git repository in", repoPath)
+		fmt.Println("You can now add repositories using `addrepo` command.")
 	},
 }

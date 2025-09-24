@@ -24,10 +24,13 @@ func Execute() {
 func init() {
 	// Register all commands
 	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(addRepoCmd)
 	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(logCmd)
 	rootCmd.AddCommand(checkoutCmd)
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(statusCmd)
 
 }

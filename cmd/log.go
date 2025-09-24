@@ -6,62 +6,103 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 var logCmd = &cobra.Command{
 	Use:   "log",
-	Short: "Show commit history",
+	Short: "Show commit history for a repository",
 	Run: func(cmd *cobra.Command, args []string) {
-		repoPath := filepath.Join(".", ".mygit")
-		commitsPath := filepath.Join(repoPath, "commits")
+		repoName, _ := cmd.Flags().GetString("repo")
+		if repoName == "" {
+			fmt.Println("Error: repository name is required. Use -r <repo>")
+			return
+		}
 
-		// Ensure repo exists
+		repoPath := filepath.Join(".mygit", "repositories", repoName)
+		commitsPath := filepath.Join(".mygit", "commits")
+
 		if _, err := os.Stat(repoPath); os.IsNotExist(err) {
-			fmt.Println("Repository not initialized. Run 'mygit init' first.")
+			fmt.Println("Repository does not exist:", repoName)
 			return
 		}
 
 		// Read all commit files
 		files, err := os.ReadDir(commitsPath)
-		if err != nil || len(files) == 0 {
-			fmt.Println("No commits found.")
+		if err != nil {
+			fmt.Println("Error reading commits folder:", err)
 			return
 		}
 
-		// Sort files by name (assuming numeric IDs)
-		sort.Slice(files, func(i, j int) bool {
-			return files[i].Name() > files[j].Name() // latest first
-		})
+		type Commit struct {
+			ID        int
+			Message   string
+			Timestamp string
+			FileCount int
+		}
+
+		var commits []Commit
 
 		for _, f := range files {
-			commitFile := filepath.Join(commitsPath, f.Name())
-			data, err := os.ReadFile(commitFile)
+			name := f.Name()
+			if !strings.HasPrefix(name, repoName+"_") || !strings.HasSuffix(name, ".json") {
+				continue
+			}
+
+			// Extract commit ID
+			idStr := strings.TrimSuffix(strings.TrimPrefix(name, repoName+"_"), ".json")
+			id, err := strconv.Atoi(idStr)
 			if err != nil {
 				continue
 			}
 
-			var commit map[string]interface{}
-			if err := json.Unmarshal(data, &commit); err != nil {
+			// Load commit content
+			data, err := os.ReadFile(filepath.Join(commitsPath, name))
+			if err != nil {
 				continue
 			}
 
-			id := commit["id"]
-			message := commit["message"]
-			timestamp := commit["timestamp"]
+			var commitData map[string]interface{}
+			json.Unmarshal(data, &commitData)
 
-			fmt.Printf("Commit %v: %v\n", id, message)
-			fmt.Printf("Timestamp: %v\n", timestamp)
-
-			if filesMap, ok := commit["files"].(map[string]interface{}); ok {
-				fmt.Println("Files:")
-				for fname := range filesMap {
-					fmt.Printf("  - %s\n", fname)
-				}
+			filesMap, ok := commitData["files"].(map[string]interface{})
+			fileCount := 0
+			if ok {
+				fileCount = len(filesMap)
 			}
-			fmt.Println("--------------------------------------------------")
+
+			message, _ := commitData["message"].(string)
+			timestamp, _ := commitData["timestamp"].(string)
+
+			commits = append(commits, Commit{
+				ID:        id,
+				Message:   message,
+				Timestamp: timestamp,
+				FileCount: fileCount,
+			})
+		}
+
+		// Sort commits descending by ID
+		sort.Slice(commits, func(i, j int) bool {
+			return commits[i].ID > commits[j].ID
+		})
+
+		fmt.Printf("Commit history for repository '%s':\n", repoName)
+		for _, c := range commits {
+			fmt.Printf("Commit %d | %s\n", c.ID, c.Timestamp)
+			fmt.Printf("Message: %s\n", c.Message)
+			fmt.Printf("Files: %d\n\n", c.FileCount)
+		}
+
+		if len(commits) == 0 {
+			fmt.Println("No commits yet.")
 		}
 	},
 }
 
+func init() {
+	logCmd.Flags().StringP("repo", "r", "", "Repository name")
+}
